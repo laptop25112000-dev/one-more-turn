@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ONE MORE TURN — High-Res Cel-Shaded 3D Time-Loop Mystery & Stealth Game</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <link rel="stylesheet" href="styles/main.css" />
+</head>
+<body class="bg-slate-950 text-slate-100 antialiased">
+
+  <!-- 3D WebGL Viewport Container -->
+  <div id="viewport-container" class="fixed inset-0 z-0 cursor-crosshair"></div>
+
+  <!-- Subtle Atmospheric Vignette Overlay -->
+  <div class="pointer-events-none fixed inset-0 z-10" style="background: radial-gradient(circle at center, transparent 58%, rgba(5,8,16,0.72) 100%);"></div>
+
+  <!-- Dynamic Crimson Monster Proximity / Chase Vignette Overlay -->
+  <div id="danger-vignette-overlay" class="pointer-events-none fixed inset-0 z-10 transition-opacity duration-200" style="opacity: 0; background: radial-gradient(circle at center, transparent 42%, rgba(225, 29, 72, 0.78) 100%);"></div>
+
+  <!-- ==================================================================== -->
+  <!-- IN-GAME HUD OVERLAY                                                  -->
+  <!-- ==================================================================== -->
+  <div id="hud-overlay" class="hidden fixed inset-0 z-20 pointer-events-none flex flex-col justify-between p-3 sm:p-5">
+
+    <!-- Top Bar: Mini-Map Radar + 180s Countdown Clock + Stealth/Tension Controls -->
+    <div class="flex flex-wrap items-start justify-between gap-3">
+
+      <!-- Left: Live 3D Architectural & Open-World Mini-Map & Tension Readout -->
+      <div class="pointer-events-auto flex items-center gap-3 bg-slate-950/85 backdrop-blur-md border border-slate-700/80 rounded-xl p-2.5 shadow-xl">
+        <canvas id="hud-minimap-canvas" width="96" height="136" class="rounded border border-slate-700 bg-slate-900"></canvas>
+        <div class="space-y-1 pr-1">
+          <div class="flex items-center gap-1.5">
+            <span id="hud-loop-counter" class="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-400/40">LOOP #1</span>
+            <span id="hud-clue-counter" class="px-2 py-0.5 rounded text-[11px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-400/40">CLUES: 1/20</span>
+          </div>
+          <div id="hud-location-name" class="text-xs sm:text-sm font-bold text-slate-100 tracking-wide">1. School Entrance</div>
+          <div class="text-[10px] font-mono text-slate-400 flex flex-wrap items-center gap-2">
+            <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-400"></span>Arin</span>
+            <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-300"></span>Maya</span>
+            <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-cyan-300"></span>Rowan</span>
+            <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-rose-500"></span>Stalkers</span>
+          </div>
+          <!-- Monster Proximity & Tension Meter -->
+          <div class="pt-0.5">
+            <div class="flex justify-between items-center mb-0.5">
+              <span id="hud-tension-label" class="text-[10px] font-mono text-slate-300">STEALTH CLEAR (0%)</span>
+            </div>
+            <div class="w-44 h-1.5 rounded-full bg-slate-800 overflow-hidden border border-slate-700">
+              <div id="hud-tension-bar" class="h-full bg-emerald-400 transition-all duration-150" style="width: 0%"></div>
+            </div>
+          </div>
+          <div id="pointer-lock-hint" class="text-[10px] font-mono text-amber-300/90">CLICK 3D VIEW FOR MOUSE LOCK (OR DRAG TO LOOK)</div>
+        </div>
+      </div>
+
+      <!-- Center: The 180-Second Time-Loop Countdown Timer -->
+      <div class="pointer-events-auto flex flex-col items-center bg-slate-950/90 backdrop-blur-md border border-slate-700/90 rounded-xl px-5 py-2 shadow-2xl">
+        <div class="text-[10px] font-mono uppercase tracking-widest text-slate-400">TEMPORAL RESET COUNTDOWN (11:57 PM)</div>
+        <div id="hud-timer-value" class="text-2xl font-mono font-black tracking-wider text-emerald-300">03:00.0</div>
+        <div class="flex items-center gap-2 mt-1">
+          <button onclick="window.OMT_Engine.openJournalModal('all')" class="px-2.5 py-0.5 rounded text-[11px] font-mono font-semibold bg-amber-500 hover:bg-amber-400 text-slate-950 transition">
+            📓 Memory Journal [TAB]
+          </button>
+          <button onclick="window.OMT_Engine.triggerManualTimeLoopReset()" class="px-2 py-0.5 rounded text-[11px] font-mono bg-purple-900/70 hover:bg-purple-800 text-purple-200 border border-purple-500/40 transition" title="Rewind to start of loop with all current memories">
+            ⏪ Rewind Loop [R]
+          </button>
+        </div>
+      </div>
+
+      <!-- Right: Stealth Crouch, Decoy Chime, Flashlight & Pause Controls -->
+      <div class="pointer-events-auto flex flex-col items-end gap-1.5">
+        <div class="flex flex-wrap items-center justify-end gap-1.5">
+          <button id="hud-crouch-badge" onclick="window.OMT_Engine.toggleCrouch()" class="px-2.5 py-1 rounded text-xs font-mono bg-slate-800/80 text-slate-300 border border-slate-700">
+            POSTURE: STANDING [C]
+          </button>
+          <button onclick="window.OMT_Engine.throwAcousticDecoy()" class="px-2.5 py-1 rounded text-xs font-mono bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-200 border border-cyan-400/40" title="Throw Acoustic Decoy to lure monsters away">
+            🔔 Decoy [G]
+          </button>
+          <button id="hud-flashlight-badge" onclick="window.OMT_Engine.toggleFlashlight()" class="px-2.5 py-1 rounded text-xs font-mono bg-amber-500/20 text-amber-300 border border-amber-400/40">
+            FLASHLIGHT: ON [F]
+          </button>
+          <button onclick="window.OMT_Engine.togglePauseMenu()" class="px-3 py-1 rounded text-xs font-mono font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600">
+            ⏸ Menu [ESC]
+          </button>
+        </div>
+        <div id="hud-inventory-bar" class="flex flex-wrap justify-end gap-1.5 bg-slate-950/80 px-3 py-1.5 rounded-lg border border-slate-800">
+          <span class="text-[11px] font-mono text-slate-400">Loop Inventory: Empty (Persistent Clues in [TAB] Journal)</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Center Screen Reticle & Interaction Prompt -->
+    <div class="flex flex-col items-center justify-center my-auto">
+      <div id="hud-crosshair" class="w-2 h-2 rounded-full bg-white/80 border border-slate-900 transition-transform"></div>
+      <div id="hud-interaction-prompt" class="hidden mt-4 px-4 py-2 rounded-xl bg-slate-950/90 border border-amber-400/60 text-center shadow-2xl max-w-sm">
+        <div id="hud-interact-title" class="text-xs sm:text-sm font-bold text-amber-300">Object</div>
+        <div id="hud-interact-sub" class="text-[11px] font-mono text-slate-200 mt-0.5">Press [E] to Interact</div>
+        <button onclick="window.OMT_Engine.triggerInteraction()" class="pointer-events-auto mt-1.5 px-3 py-1 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-mono font-bold text-xs">
+          Interact [E]
+        </button>
+      </div>
+    </div>
+
+    <!-- Bottom Bar: Toast Notifications + On-Screen Accessibility / Quick Navigate -->
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <div class="pointer-events-auto flex items-center gap-1.5 bg-slate-950/75 p-2 rounded-xl border border-slate-800">
+        <div class="grid grid-cols-3 gap-1 w-24">
+          <div></div>
+          <button onmousedown="window.OMT_Engine.setTouchMove('up',true)" onmouseup="window.OMT_Engine.setTouchMove('up',false)" ontouchstart="window.OMT_Engine.setTouchMove('up',true)" ontouchend="window.OMT_Engine.setTouchMove('up',false)" class="py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono">W</button>
+          <div></div>
+          <button onmousedown="window.OMT_Engine.setTouchMove('left',true)" onmouseup="window.OMT_Engine.setTouchMove('left',false)" ontouchstart="window.OMT_Engine.setTouchMove('left',true)" ontouchend="window.OMT_Engine.setTouchMove('left',false)" class="py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono">A</button>
+          <button onmousedown="window.OMT_Engine.setTouchMove('down',true)" onmouseup="window.OMT_Engine.setTouchMove('down',false)" ontouchstart="window.OMT_Engine.setTouchMove('down',true)" ontouchend="window.OMT_Engine.setTouchMove('down',false)" class="py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono">S</button>
+          <button onmousedown="window.OMT_Engine.setTouchMove('right',true)" onmouseup="window.OMT_Engine.setTouchMove('right',false)" ontouchstart="window.OMT_Engine.setTouchMove('right',true)" ontouchend="window.OMT_Engine.setTouchMove('right',false)" class="py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono">D</button>
+        </div>
+        <div class="flex flex-col gap-1 pl-1">
+          <div class="flex flex-wrap gap-1">
+            <button id="mobile-sprint-btn" onclick="window.OMT_Engine.toggleSprintTouch()" class="px-2.5 py-1.5 rounded-lg bg-slate-800 text-slate-200 text-xs font-mono border border-slate-700">⚡ Sprint</button>
+            <button onclick="window.OMT_Engine.triggerJump()" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono border border-slate-700">⤴ Jump</button>
+            <button onclick="window.OMT_Engine.triggerInteraction()" class="px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-mono font-bold border border-amber-400/40">✋ Use [E]</button>
+          </div>
+          <div class="hidden sm:flex flex-col text-[10px] font-mono text-slate-400">
+            <span>Swipe 3D View / Mouse: Look • C: Crouch • G: Decoy</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="hud-toast" class="hidden mx-auto px-4 py-2.5 rounded-xl bg-emerald-950/95 border border-emerald-400 text-emerald-200 text-xs sm:text-sm font-mono font-semibold shadow-2xl">
+        Memory Updated
+      </div>
+
+      <div class="pointer-events-auto flex items-center gap-1.5 bg-slate-950/80 px-2.5 py-1.5 rounded-xl border border-slate-800">
+        <label for="quick-room-select" class="text-[11px] font-mono text-slate-400">Quick Navigate:</label>
+        <select id="quick-room-select" onchange="if(this.value){window.OMT_Engine.quickTeleportToRoom(this.value);this.value='';}" class="bg-slate-900 text-slate-200 text-xs font-mono rounded px-2 py-1 border border-slate-700">
+          <option value="">-- Jump to Area (15 Zones) --</option>
+          <option value="entrance">1. School Entrance</option>
+          <option value="reception">2. Reception Office</option>
+          <option value="hallway">3. Main Hallway</option>
+          <option value="class101">4A. Classroom 101 (Physics)</option>
+          <option value="class102">4B. Classroom 102 (History)</option>
+          <option value="library">5. School Library</option>
+          <option value="scilab">6. Science Laboratory</option>
+          <option value="complab">7. Computer Laboratory</option>
+          <option value="staff">8. Faculty Staff Room</option>
+          <option value="storage">9. Utility Storage Room</option>
+          <option value="staircase">10. Basement Staircase</option>
+          <option value="basement">11. Restricted Basement</option>
+          <option value="underlab">12. Secret Underground Lab</option>
+          <option value="courtyard">13. Open-World Starlight Courtyard</option>
+          <option value="neighbor">14. Caretaker's Victorian House</option>
+          <option value="windmill">15. Astral Windmill & Observatory</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================================================================== -->
+  <!-- 180-SECOND TIME-LOOP RESET VISUAL DISTORTION OVERLAY                 -->
+  <!-- ==================================================================== -->
+  <div id="time-reset-overlay" class="hidden fixed inset-0 z-50 flex flex-col items-center justify-center bg-purple-950/85 backdrop-blur-md time-reset-anim text-center p-6">
+    <div class="text-xs font-mono uppercase tracking-widest text-purple-300 mb-2" id="time-reset-reason">180-SECOND TEMPORAL ANOMALY RESET</div>
+    <div class="text-4xl sm:text-6xl font-black tracking-tighter text-white drop-shadow mb-3">⏪ 11:57:00 PM</div>
+    <div class="text-lg sm:text-xl font-mono font-bold text-amber-300" id="time-reset-loop-num">BEGINNING LOOP #2</div>
+    <p class="max-w-md text-xs sm:text-sm text-purple-200 mt-3 font-mono">
+      The school and courtyard snap back to 11:57 PM. Doors close, stalkers return to their patrols, and characters repeat their actions—but Arin's Memory Journal retains every discovered clue and code.
+    </p>
+  </div>
+
+  <!-- ==================================================================== -->
+  <!-- MAIN MENU OVERLAY                                                    -->
+  <!-- ==================================================================== -->
+  <div id="main-menu-overlay" class="fixed inset-0 z-30 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm overflow-y-auto">
+    <div class="max-w-4xl w-full grid grid-cols-1 md:grid-cols-12 bg-slate-900/95 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden my-auto">
+
+      <div class="md:col-span-7 p-6 sm:p-8 flex flex-col justify-between space-y-5">
+        <div class="space-y-2">
+          <div class="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-amber-500/15 border border-amber-400/30 text-amber-300 text-xs font-mono">
+            <span>✨ HIGH-RES CEL-SHADED 3D • OPEN-WORLD & STALKER STEALTH</span>
+          </div>
+          <h1 class="text-3xl sm:text-5xl font-black tracking-tight text-white">ONE MORE TURN</h1>
+          <p class="text-xs sm:text-sm text-slate-300 leading-relaxed">
+            You are <strong>Arin</strong>, trapped at <strong>11:57 PM</strong> inside Blackwood Academy and its surrounding <strong>Open-World Starlight Courtyard</strong>. Every <strong>180 seconds</strong>, time resets. Evade <strong>The Caretaker</strong> and the <strong>Abyssal Chrono-Wraiths</strong> using stealth crouch (`C`), decoys (`G`), and Sanctuary Wardrobes while infiltrating the Caretaker's Victorian House and Underground Lab!
+          </p>
+        </div>
+
+        <div class="space-y-2.5">
+          <button onclick="window.OMT_Engine.startNewGame()" class="w-full py-3.5 px-5 rounded-xl font-bold text-sm bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-lg transition flex items-center justify-between">
+            <span>▶ NEW GAME (START LOOP #1)</span>
+            <span class="font-mono text-xs">180s CYCLE</span>
+          </button>
+
+          <button id="menu-continue-btn" onclick="window.OMT_Engine.continueSavedGame()" class="w-full py-3 px-5 rounded-xl font-semibold text-sm bg-slate-800/60 text-slate-500 border border-slate-700/50 cursor-not-allowed flex items-center justify-between" disabled>
+            <span>↻ CONTINUE SAVED LOOP</span>
+            <span class="font-mono text-xs">PERSISTENT MEMORY</span>
+          </button>
+
+          <div class="grid grid-cols-3 gap-2 pt-1">
+            <button onclick="document.getElementById('menu-tab-controls').classList.remove('hidden');document.getElementById('menu-tab-settings').classList.add('hidden');document.getElementById('menu-tab-credits').classList.add('hidden');" class="py-2 px-3 rounded-lg text-xs font-mono bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700">
+              🎮 Controls & Guide
+            </button>
+            <button onclick="document.getElementById('menu-tab-settings').classList.remove('hidden');document.getElementById('menu-tab-controls').classList.add('hidden');document.getElementById('menu-tab-credits').classList.add('hidden');" class="py-2 px-3 rounded-lg text-xs font-mono bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700">
+              ⚙ Settings
+            </button>
+            <button onclick="document.getElementById('menu-tab-credits').classList.remove('hidden');document.getElementById('menu-tab-controls').classList.add('hidden');document.getElementById('menu-tab-settings').classList.add('hidden');" class="py-2 px-3 rounded-lg text-xs font-mono bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700">
+              📜 Credits & Docs
+            </button>
+          </div>
+        </div>
+
+        <div class="text-[11px] font-mono text-slate-400 border-t border-slate-800 pt-3 flex items-center justify-between">
+          <span>15 School & Open-World Areas • 3 Roaming Stalkers</span>
+          <span>Genshin Cel-Shading • Spatial Audio</span>
+        </div>
+      </div>
+
+      <div class="md:col-span-5 bg-slate-950/90 border-t md:border-t-0 md:border-l border-slate-800 p-6 flex flex-col justify-between">
+
+        <div id="menu-tab-controls" class="space-y-3">
+          <h2 class="text-sm font-bold uppercase tracking-wider text-amber-300 font-mono">Controls & Stealth Survival</h2>
+          <div class="space-y-1.5 text-xs font-mono text-slate-300">
+            <div class="flex justify-between py-1 border-b border-slate-800"><span>WASD / Shift / Space</span><span class="text-amber-300">Move / Sprint / Jump</span></div>
+            <div class="flex justify-between py-1 border-b border-slate-800"><span>C Key</span><span class="text-cyan-300">Stealth Crouch (Silent)</span></div>
+            <div class="flex justify-between py-1 border-b border-slate-800"><span>G Key</span><span class="text-cyan-300">Throw Acoustic Decoy</span></div>
+            <div class="flex justify-between py-1 border-b border-slate-800"><span>E Key</span><span class="text-amber-300">Interact / Hide in Wardrobe</span></div>
+            <div class="flex justify-between py-1 border-b border-slate-800"><span>F Key</span><span class="text-amber-300">Toggle Flashlight</span></div>
+            <div class="flex justify-between py-1 border-b border-slate-800"><span>TAB Key</span><span class="text-amber-300">Open Memory Journal</span></div>
+            <div class="flex justify-between py-1"><span>R / ESC</span><span class="text-amber-300">Rewind Loop / Pause</span></div>
+          </div>
+          <div class="p-3 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-300 space-y-1">
+            <div class="font-bold text-rose-300">Hello Neighbor Open-World & Stalkers:</div>
+            <p>Open the South Entrance Gate into the <strong>Starlight Courtyard</strong>! Ring the Decoy Bell to lure <strong>The Caretaker</strong> out of his Victorian House (PIN: <code>1157</code>) and steal his <strong>Golden Celestial Skeleton Key</strong>!</p>
+          </div>
+        </div>
+
+        <div id="menu-tab-settings" class="hidden space-y-3">
+          <h2 class="text-sm font-bold uppercase tracking-wider text-amber-300 font-mono">Settings & High-Res Graphics</h2>
+          <div class="space-y-2.5 text-xs">
+            <div>
+              <label class="block text-slate-300 font-mono mb-1">Mouse Look Sensitivity</label>
+              <input type="range" min="0.3" max="2.5" step="0.1" value="1.0" oninput="window.OMT_Engine.setSensitivity(this.value)" class="w-full accent-amber-400">
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block text-slate-300 font-mono mb-1">Graphics Quality</label>
+                <select onchange="window.OMT_Engine.applyGraphicsPreset(this.value)" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-slate-200 font-mono">
+                  <option value="high" selected>High (Genshin Cel + Shadows)</option>
+                  <option value="medium">Medium (Balanced)</option>
+                  <option value="low">Low (Integrated GPU)</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-slate-300 font-mono mb-1">Resolution Scale</label>
+                <select onchange="window.OMT_Engine.applyResolutionScale(this.value)" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-slate-200 font-mono">
+                  <option value="1.25" selected>125% Ultra HD</option>
+                  <option value="1.0">100% Native</option>
+                  <option value="0.75">75% Performance</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label class="block text-slate-300 font-mono mb-0.5">Master Volume</label>
+              <input type="range" min="0" max="1" step="0.05" value="0.85" oninput="window.OMT_Audio.setVolume('master', this.value)" class="w-full accent-emerald-400">
+            </div>
+            <div>
+              <label class="block text-slate-300 font-mono mb-0.5">Music Volume</label>
+              <input type="range" min="0" max="1" step="0.05" value="0.55" oninput="window.OMT_Audio.setVolume('music', this.value)" class="w-full accent-emerald-400">
+            </div>
+            <div>
+              <label class="block text-slate-300 font-mono mb-0.5">Sound Effects & 3D Ambience</label>
+              <input type="range" min="0" max="1" step="0.05" value="0.85" oninput="window.OMT_Audio.setVolume('sfx', this.value);window.OMT_Audio.setVolume('ambience', this.value)" class="w-full accent-emerald-400">
+            </div>
+            <button onclick="window.OMT_Engine.toggleFullscreen()" class="w-full py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 font-mono border border-slate-700">
+              ⛶ Toggle Fullscreen
+            </button>
+          </div>
+        </div>
+
+        <div id="menu-tab-credits" class="hidden space-y-2.5 text-xs text-slate-300">
+          <h2 class="text-sm font-bold uppercase tracking-wider text-amber-300 font-mono">Complete Puzzle & Open-World Guide</h2>
+          <div class="p-2.5 rounded bg-slate-900 border border-slate-800 font-mono text-[11px] space-y-1">
+            <div class="text-amber-300 font-bold">Master Walkthrough & Codes:</div>
+            <div>• Caretaker's Courtyard House: <strong>1157</strong> (Golden Skeleton Key!)</div>
+            <div>• Reception Safe PIN: <strong>0418</strong> (Staff Key)</div>
+            <div>• Staff Room PIN: <strong>7392</strong> (Storage Key + Dossier)</div>
+            <div>• Storage Breaker: <strong>A + C + D = 120V</strong></div>
+            <div>• Maya's Locker #14: <strong>0203</strong> (Vol. III + Vial)</div>
+            <div>• Sci-Lab Spectrometer: <strong>432 Hz</strong> | Passphrase: <strong>ECHO-11:57</strong></div>
+            <div>• Basement Blast Door: <strong>9104</strong> → Align <strong>BETA → ALPHA → GAMMA</strong></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================================================================== -->
+  <!-- PAUSE MENU OVERLAY ([ESC])                                           -->
+  <!-- ==================================================================== -->
+  <div id="pause-menu-overlay" class="hidden fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+    <div class="max-w-md w-full bg-slate-900 border border-slate-700 rounded-2xl p-6 space-y-4 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h2 class="text-xl font-black text-white tracking-wide">GAME PAUSED</h2>
+        <span class="text-xs font-mono text-amber-300">TIME LOOP FROZEN</span>
+      </div>
+      <div class="space-y-2 text-xs">
+        <label class="block text-slate-300 font-mono">Mouse Sensitivity</label>
+        <input type="range" min="0.3" max="2.5" step="0.1" value="1.0" oninput="window.OMT_Engine.setSensitivity(this.value)" class="w-full accent-amber-400">
+        <label class="block text-slate-300 font-mono pt-1">Master Volume</label>
+        <input type="range" min="0" max="1" step="0.05" value="0.85" oninput="window.OMT_Audio.setVolume('master', this.value)" class="w-full accent-emerald-400">
+      </div>
+      <div class="space-y-2 pt-2">
+        <button onclick="window.OMT_Engine.togglePauseMenu()" class="w-full py-2.5 rounded-xl font-bold text-sm bg-amber-500 hover:bg-amber-400 text-slate-950">
+          ▶ Resume Game
+        </button>
+        <button onclick="window.OMT_Engine.openJournalModal('all');document.getElementById('pause-menu-overlay').classList.add('hidden');window.OMT_Systems.state.isPaused=false;" class="w-full py-2.5 rounded-xl font-semibold text-sm bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700">
+          📓 Open Memory Journal [TAB]
+        </button>
+        <button onclick="window.OMT_Engine.triggerManualTimeLoopReset();document.getElementById('pause-menu-overlay').classList.add('hidden');window.OMT_Systems.state.isPaused=false;" class="w-full py-2.5 rounded-xl font-semibold text-sm bg-purple-900/60 hover:bg-purple-800 text-purple-200 border border-purple-500/40">
+          ⏪ Rewind Current Loop Now
+        </button>
+        <button onclick="window.OMT_Engine.returnToMainMenu()" class="w-full py-2.5 rounded-xl font-semibold text-sm bg-slate-800 hover:bg-red-950/70 text-slate-300 hover:text-red-200 border border-slate-700">
+          ⌂ Save & Return to Main Menu
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================================================================== -->
+  <!-- MODAL 1: PERSISTENT MEMORY JOURNAL ([TAB])                           -->
+  <!-- ==================================================================== -->
+  <div id="modal-journal" class="game-modal hidden fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+    <div class="max-w-4xl w-full bg-slate-900 border border-amber-500/40 rounded-2xl p-6 shadow-2xl max-h-[90vh] flex flex-col">
+      <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+        <div>
+          <h2 class="text-lg sm:text-xl font-black text-amber-300 tracking-wide">📓 ARIN'S PERSISTENT MEMORY JOURNAL</h2>
+          <p class="text-xs font-mono text-slate-400">All clues, passwords, and stalker patrol notes recorded here survive every 180-second reset.</p>
+        </div>
+        <button onclick="window.OMT_Engine.closeAllModals()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono border border-slate-600">
+          ✕ Close [TAB / ESC]
+        </button>
+      </div>
+
+      <div class="flex flex-wrap gap-1.5 my-3">
+        <button data-tab="all" onclick="window.OMT_Engine.renderJournalCategory('all')" class="journal-tab-btn px-3 py-1.5 rounded text-xs font-mono font-bold bg-amber-500 text-slate-950">All Memories</button>
+        <button data-tab="clues" onclick="window.OMT_Engine.renderJournalCategory('clues')" class="journal-tab-btn px-3 py-1.5 rounded text-xs font-mono bg-slate-800 text-slate-300">Discovered Clues</button>
+        <button data-tab="passwords" onclick="window.OMT_Engine.renderJournalCategory('passwords')" class="journal-tab-btn px-3 py-1.5 rounded text-xs font-mono bg-slate-800 text-slate-300">Known Passwords</button>
+        <button data-tab="characters" onclick="window.OMT_Engine.renderJournalCategory('characters')" class="journal-tab-btn px-3 py-1.5 rounded text-xs font-mono bg-slate-800 text-slate-300">Character Observations</button>
+        <button data-tab="conversations" onclick="window.OMT_Engine.renderJournalCategory('conversations')" class="journal-tab-btn px-3 py-1.5 rounded text-xs font-mono bg-slate-800 text-slate-300">Conversations</button>
+        <button data-tab="documents" onclick="window.OMT_Engine.renderJournalCategory('documents')" class="journal-tab-btn px-3 py-1.5 rounded text-xs font-mono bg-slate-800 text-slate-300">Documents</button>
+        <button data-tab="mysteries" onclick="window.OMT_Engine.renderJournalCategory('mysteries')" class="journal-tab-btn px-3 py-1.5 rounded text-xs font-mono bg-slate-800 text-slate-300">Unsolved Mysteries</button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-12 gap-4 overflow-y-auto pr-1">
+        <div id="journal-entries-list" class="md:col-span-7 space-y-2.5 overflow-y-auto max-h-[52vh]"></div>
+        <div class="md:col-span-5 space-y-4">
+          <div class="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+            <h3 class="text-xs font-mono uppercase tracking-wider text-amber-300 font-bold">🔑 Known Passwords & Codes</h3>
+            <div id="journal-known-codes" class="space-y-1.5"></div>
+          </div>
+          <div class="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+            <h3 class="text-xs font-mono uppercase tracking-wider text-cyan-300 font-bold">⏱ NPC Schedules & Stalker Zones</h3>
+            <div id="journal-npc-schedules" class="space-y-2"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================================================================== -->
+  <!-- MODAL 2: 3D OBJECT & DOCUMENT INSPECTION INTERFACE                   -->
+  <!-- ==================================================================== -->
+  <div id="modal-inspect" class="game-modal hidden fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+    <div class="max-w-xl w-full bg-slate-900 border border-slate-700 rounded-2xl p-6 space-y-4 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 id="inspect-modal-title" class="text-lg font-bold text-amber-300">Document / Object Examination</h3>
+        <button onclick="window.OMT_Engine.closeAllModals()" class="px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-mono">✕ Close</button>
+      </div>
+      <div class="flex flex-col sm:flex-row items-center gap-4">
+        <canvas id="inspect-3d-canvas" width="220" height="160" class="rounded-xl border border-slate-700 bg-slate-950 shrink-0"></canvas>
+        <div id="inspect-modal-body" class="text-xs sm:text-sm text-slate-200 font-mono whitespace-pre-line leading-relaxed bg-slate-950/90 p-4 rounded-xl border border-slate-800 w-full"></div>
+      </div>
+      <div class="flex justify-end">
+        <button onclick="window.OMT_Engine.closeAllModals()" class="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs font-mono">
+          Record in Memory Journal & Continue
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================================================================== -->
+  <!-- MODAL 3: 4-DIGIT KEYPAD / COMBINATION LOCK INTERFACE                 -->
+  <!-- ==================================================================== -->
+  <div id="modal-keypad" class="game-modal hidden fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+    <div class="max-w-sm w-full bg-slate-900 border border-slate-700 rounded-2xl p-6 space-y-4 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+        <h3 id="keypad-modal-title" class="text-base font-bold text-white">Security Keypad</h3>
+        <button onclick="window.OMT_Engine.closeAllModals()" class="px-2.5 py-1 rounded bg-slate-800 text-slate-300 text-xs font-mono">✕</button>
+      </div>
+      <p id="keypad-modal-hint" class="text-xs text-slate-400 font-mono"></p>
+      <div id="keypad-display" class="w-full py-3 rounded-xl bg-slate-950 border border-emerald-500/40 text-center text-2xl font-mono font-bold tracking-widest text-emerald-300">
+        _ _ _ _
+      </div>
+      <button id="keypad-auto-btn" onclick="window.OMT_Engine.autoEnterKnownKeypadCode()" class="hidden w-full py-2 px-3 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400 text-amber-300 text-xs font-mono font-bold">
+        ⚡ Auto-Enter Known Code from Memory
+      </button>
+      <div class="grid grid-cols-3 gap-2">
+        <button onclick="window.OMT_Engine.pressKeypadDigit('1')" class="py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-mono font-bold">1</button>
+        <button onclick="window.OMT_Engine.pressKeypadDigit('2')" class="py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-mono font-bold">2</button>
+        <button onclick="window.OMT_Engine.pressKeypadDigit('3')" class="py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-mono font-bold">3</button>
+        <button onclick="window.OMT_Engine.pressKeypadDigit('4')" class="py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-mono font-bold">4</button>
+        <button onclick="window.OMT_Engine.pressKeypadDigit('5')" class="py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-mono font-bold">5</button>
+        <button onclick="window.OMT_Engine.pressKeypadDigit('6')" class="py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-mono font-bold">6</button>
+        <button onclick="window.OMT_Engine.pressKeypadDigit('7')" class="py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-mono font-bold">7</button>
+        <button onclick="window.OMT_Engine.pressKeypadDigit('8')" class="py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-mono font-bold">8</button>
+        <button onclick="window.OMT_Engine.pressKeypadDigit('9')" class="py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-mono font-bold">9</button>
+        <button onclick="window.OMT_Engine.pressKeypadClear()" class="py-3 rounded-lg bg-red-950/70 hover:bg-red-900 text-red-200 font-mono text-xs font-bold">CLR</button>
+        <button onclick="window.OMT_Engine.pressKeypadDigit('0')" class="py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-mono font-bold">0</button>
+        <button onclick="window.OMT_Engine.submitKeypadCode()" class="py-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs font-bold">ENTER</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================================================================== -->
+  <!-- MODAL 4: LIBRARY ACOUSTIC RESONANCE SHELF PUZZLE                     -->
+  <!-- ==================================================================== -->
+  <div id="modal-library" class="game-modal hidden fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+    <div class="max-w-md w-full bg-slate-900 border border-slate-700 rounded-2xl p-6 space-y-4 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+        <h3 class="text-base font-bold text-amber-300">📚 Library Acoustic Resonance Archive</h3>
+        <button onclick="window.OMT_Engine.closeAllModals()" class="px-2.5 py-1 rounded bg-slate-800 text-slate-300 text-xs font-mono">✕</button>
+      </div>
+      <p id="library-modal-status" class="text-xs sm:text-sm text-slate-200 font-mono leading-relaxed bg-slate-950 p-4 rounded-xl border border-slate-800"></p>
+      <button id="library-place-book-btn" onclick="window.OMT_Engine.solveLibraryShelf()" class="hidden w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs font-mono">
+        📖 Insert "Tachyon Harmonics Vol. III" Into Shelf Slot
+      </button>
+    </div>
+  </div>
+
+  <!-- ==================================================================== -->
+  <!-- MODAL 5: STORAGE ROOM 120V ELECTRICAL BREAKER PANEL                  -->
+  <!-- ==================================================================== -->
+  <div id="modal-breaker" class="game-modal hidden fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+    <div class="max-w-md w-full bg-slate-900 border border-slate-700 rounded-2xl p-6 space-y-3 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+        <h3 class="text-base font-bold text-cyan-300">⚡ Storage Room Auxiliary Breaker Panel</h3>
+        <button onclick="window.OMT_Engine.closeAllModals()" class="px-2.5 py-1 rounded bg-slate-800 text-slate-300 text-xs font-mono">✕</button>
+      </div>
+      <p class="text-xs text-slate-300 font-mono">Balance the school's auxiliary grid to exactly <strong>120V</strong> to restore power to the Computer Lab and Science Lab.</p>
+      <div id="breaker-voltage-readout" class="py-2.5 rounded-xl bg-slate-950 border border-cyan-500/40 text-center text-xl font-mono font-black text-cyan-300">
+        0 V / 120 V TARGET
+      </div>
+      <div class="space-y-2">
+        <button id="breaker-btn-A" onclick="window.OMT_Engine.toggleBreakerSwitch('A')" class="w-full py-2 px-4 rounded font-mono text-sm bg-slate-800 text-slate-300">Circuit A (45V)</button>
+        <button id="breaker-btn-B" onclick="window.OMT_Engine.toggleBreakerSwitch('B')" class="w-full py-2 px-4 rounded font-mono text-sm bg-slate-800 text-slate-300">Circuit B (30V)</button>
+        <button id="breaker-btn-C" onclick="window.OMT_Engine.toggleBreakerSwitch('C')" class="w-full py-2 px-4 rounded font-mono text-sm bg-slate-800 text-slate-300">Circuit C (60V)</button>
+        <button id="breaker-btn-D" onclick="window.OMT_Engine.toggleBreakerSwitch('D')" class="w-full py-2 px-4 rounded font-mono text-sm bg-slate-800 text-slate-300">Circuit D (15V)</button>
+        <button id="breaker-btn-E" onclick="window.OMT_Engine.toggleBreakerSwitch('E')" class="w-full py-2 px-4 rounded font-mono text-sm bg-slate-800 text-slate-300">Circuit E (45V)</button>
+      </div>
+      <div id="breaker-status-badge" class="mt-2 p-2.5 rounded text-center font-mono text-xs bg-slate-800 text-slate-300"></div>
+    </div>
+  </div>
+
+  <!-- ==================================================================== -->
+  <!-- MODAL 6: SCIENCE LAB HARMONIC RESONANCE SPECTROMETER                 -->
+  <!-- ==================================================================== -->
+  <div id="modal-spectrometer" class="game-modal hidden fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+    <div class="max-w-md w-full bg-slate-900 border border-slate-700 rounded-2xl p-6 space-y-4 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+        <h3 class="text-base font-bold text-emerald-300">🔬 Harmonic Resonance Spectrometer</h3>
+        <button onclick="window.OMT_Engine.closeAllModals()" class="px-2.5 py-1 rounded bg-slate-800 text-slate-300 text-xs font-mono">✕</button>
+      </div>
+      <canvas id="spectro-wave-canvas" width="360" height="110" class="w-full rounded-xl border border-slate-700 bg-slate-950"></canvas>
+      <div class="flex items-center justify-between font-mono text-xs text-slate-300">
+        <span>Modulation Frequency:</span>
+        <span id="spectro-freq-val" class="text-lg font-bold text-amber-300">396 Hz</span>
+      </div>
+      <input id="spectro-freq-slider" type="range" min="360" max="480" step="4" value="396" oninput="window.OMT_Engine.updateSpectrometerUI()" class="w-full accent-emerald-400">
+      <div id="spectro-status-msg" class="p-2.5 rounded font-mono text-xs bg-slate-800 text-slate-300 border border-slate-700"></div>
+    </div>
+  </div>
+
+  <!-- ==================================================================== -->
+  <!-- MODAL 7: COMPUTER LAB ADMIN TERMINAL #04                             -->
+  <!-- ==================================================================== -->
+  <div id="modal-terminal" class="game-modal hidden fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+    <div class="max-w-lg w-full bg-slate-900 border border-emerald-500/40 rounded-2xl p-6 space-y-4 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+        <h3 class="text-base font-mono font-bold text-emerald-400">💻 BLACKWOOD OS — ADMIN TERMINAL #04</h3>
+        <button onclick="window.OMT_Engine.closeAllModals()" class="px-2.5 py-1 rounded bg-slate-800 text-slate-300 text-xs font-mono">✕</button>
+      </div>
+      <div id="terminal-screen-body"></div>
+    </div>
+  </div>
+
+  <!-- ==================================================================== -->
+  <!-- MODAL 8: NPC BRANCHING DIALOGUE INTERFACE (MAYA & ROWAN)             -->
+  <!-- ==================================================================== -->
+  <div id="modal-dialogue" class="game-modal hidden fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-sm">
+    <div class="max-w-xl w-full bg-slate-900/95 border border-slate-700 rounded-2xl p-6 space-y-4 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-2.5">
+        <div>
+          <div id="dialogue-speaker-name" class="text-lg font-black text-amber-300">MAYA LIN</div>
+          <div id="dialogue-speaker-role" class="text-[11px] font-mono text-slate-400">HONORS PHYSICS STUDENT</div>
+        </div>
+        <button onclick="window.OMT_Engine.closeAllModals()" class="px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-mono">End Conversation [ESC]</button>
+      </div>
+      <div id="dialogue-speech-text" class="p-4 rounded-xl bg-slate-950 border border-slate-800 text-xs sm:text-sm text-slate-100 leading-relaxed font-medium"></div>
+      <div class="space-y-2" id="dialogue-options-list"></div>
+    </div>
+  </div>
+
+  <!-- ==================================================================== -->
+  <!-- MODAL 9: UNDERGROUND LAB CENTRAL TEMPORAL STABILIZER CONSOLE         -->
+  <!-- ==================================================================== -->
+  <div id="modal-core" class="game-modal hidden fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
+    <div class="max-w-lg w-full bg-slate-900 border border-cyan-500/50 rounded-2xl p-6 space-y-4 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+        <h3 class="text-base sm:text-lg font-black text-cyan-300 font-mono">⚛ CHRONO-CORE STABILIZER CONSOLE</h3>
+        <button onclick="window.OMT_Engine.closeAllModals()" class="px-2.5 py-1 rounded bg-slate-800 text-slate-300 text-xs font-mono">✕</button>
+      </div>
+      <div id="core-pylon-status" class="p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono"></div>
+
+      <div class="space-y-1.5">
+        <div class="flex justify-between text-xs font-mono text-slate-300">
+          <span>Core Containment Harmonic Frequency:</span>
+          <span id="core-freq-display" class="font-bold text-amber-300">432 Hz</span>
+        </div>
+        <input id="core-freq-input" type="range" min="360" max="480" step="4" value="432" oninput="window.OMT_Engine.updateCoreFreqSlider(this.value)" class="w-full accent-cyan-400">
+        <div class="text-[11px] font-mono text-slate-400">Target Eigenvalue from Science Lab Spectrometer: <strong>432 Hz</strong></div>
+      </div>
+
+      <button onclick="window.OMT_Engine.quickAlignAllPylonsFromConsole()" class="w-full py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/40 text-xs font-mono font-semibold">
+        ⚡ Auto-Align Pylons (BETA → ALPHA → GAMMA) & Lock 432 Hz
+      </button>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2">
+        <button onclick="window.OMT_Engine.executeChronoCoreEnding('true')" class="py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs font-mono shadow-lg">
+          🌅 STABILIZE CORE AT 432 Hz (BREAK THE LOOP — TRUE ENDING)
+        </button>
+        <button onclick="window.OMT_Engine.executeChronoCoreEnding('paradox')" class="py-3 px-4 rounded-xl bg-purple-900/80 hover:bg-purple-800 text-purple-100 border border-purple-400/50 font-bold text-xs font-mono">
+          🌀 OVERLOAD SINGULARITY (ONE MORE TURN — PARADOX ENDING)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================================================================== -->
+  <!-- MODAL 10: GAME COMPLETION / ENDING SCREEN                            -->
+  <!-- ==================================================================== -->
+  <div id="modal-ending" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/92 backdrop-blur-lg">
+    <div class="max-w-xl w-full bg-slate-900 border border-amber-400/60 rounded-2xl p-6 sm:p-8 space-y-4 shadow-2xl text-center">
+      <div id="ending-subtitle" class="text-xs font-mono uppercase tracking-widest text-amber-300">CHRONO-CORE STABILIZED</div>
+      <h2 id="ending-title" class="text-2xl sm:text-3xl font-black text-white">ENDING A — DAWN AFTER 11:57</h2>
+      <div id="ending-narrative" class="text-xs sm:text-sm text-slate-200 leading-relaxed space-y-3 text-left bg-slate-950 p-4 rounded-xl border border-slate-800"></div>
+      <div id="ending-stats" class="text-xs font-mono text-emerald-300 py-2"></div>
+      <div class="flex flex-wrap justify-center gap-3 pt-2">
+        <button onclick="window.OMT_Engine.startNewGame();document.getElementById('modal-ending').classList.add('hidden');" class="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs font-mono">
+          ↻ Play Again (New Loop)
+        </button>
+        <button onclick="window.OMT_Engine.returnToMainMenu()" class="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs font-mono border border-slate-700">
+          ⌂ Return to Main Menu
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="src/textures.js"></script>
+  <script src="src/audio.js"></script>
+  <script src="src/world.js"></script>
+  <script src="src/characters.js"></script>
+  <script src="src/puzzles.js"></script>
+  <script src="src/engine.js"></script>
+  <script>window.addEventListener('load', function() { window.OMT_Engine.init(); });</script>
+</body>
+</html>
